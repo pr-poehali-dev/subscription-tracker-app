@@ -1,9 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Icon from '@/components/ui/icon';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
+import AuthScreen from '@/components/AuthScreen';
+import Onboarding from '@/components/Onboarding';
+import PinScreen from '@/components/PinScreen';
+import CancelSubscriptionModal from '@/components/CancelSubscriptionModal';
 
 interface Subscription {
   id: string;
@@ -69,7 +74,102 @@ const categoryColors = {
 };
 
 const Index = () => {
+  const [appState, setAppState] = useState<'auth' | 'onboarding' | 'pin-create' | 'pin-verify' | 'app'>('auth');
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isPremium, setIsPremium] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [pinEnabled, setPinEnabled] = useState(false);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
+  const [selectedSubscription, setSelectedSubscription] = useState<Subscription | null>(null);
+
+  useEffect(() => {
+    const hasCompletedOnboarding = localStorage.getItem('onboardingComplete');
+    const hasPinCode = localStorage.getItem('userPin');
+    const isAuthenticated = localStorage.getItem('isAuthenticated');
+
+    if (!isAuthenticated) {
+      setAppState('auth');
+    } else if (!hasCompletedOnboarding) {
+      setAppState('onboarding');
+    } else if (hasPinCode && !sessionStorage.getItem('pinVerified')) {
+      setAppState('pin-verify');
+    } else {
+      setAppState('app');
+    }
+
+    const storedBiometric = localStorage.getItem('biometricEnabled') === 'true';
+    const storedPin = localStorage.getItem('userPin');
+    setBiometricEnabled(storedBiometric);
+    setPinEnabled(!!storedPin);
+  }, []);
+
+  const handleAuth = (provider: 'google' | 'apple') => {
+    console.log('Auth with:', provider);
+    localStorage.setItem('isAuthenticated', 'true');
+    const hasCompletedOnboarding = localStorage.getItem('onboardingComplete');
+    setAppState(hasCompletedOnboarding ? 'app' : 'onboarding');
+  };
+
+  const handleOnboardingComplete = () => {
+    localStorage.setItem('onboardingComplete', 'true');
+    const hasPinCode = localStorage.getItem('userPin');
+    setAppState(hasPinCode ? 'pin-verify' : 'app');
+  };
+
+  const handlePinCreate = () => {
+    const pin = '1234';
+    localStorage.setItem('userPin', pin);
+    setPinEnabled(true);
+    sessionStorage.setItem('pinVerified', 'true');
+    setAppState('app');
+  };
+
+  const handlePinVerify = () => {
+    sessionStorage.setItem('pinVerified', 'true');
+    setAppState('app');
+  };
+
+  const handleToggleBiometric = (enabled: boolean) => {
+    setBiometricEnabled(enabled);
+    localStorage.setItem('biometricEnabled', String(enabled));
+  };
+
+  const handleCreatePin = () => {
+    setAppState('pin-create');
+  };
+
+  const handleRemovePin = () => {
+    localStorage.removeItem('userPin');
+    setPinEnabled(false);
+  };
+
+  const handleCancelSubscription = (sub: Subscription) => {
+    setSelectedSubscription(sub);
+    setCancelModalOpen(true);
+  };
+
+  if (appState === 'auth') {
+    return <AuthScreen onAuth={handleAuth} />;
+  }
+
+  if (appState === 'onboarding') {
+    return <Onboarding onComplete={handleOnboardingComplete} />;
+  }
+
+  if (appState === 'pin-create') {
+    return <PinScreen mode="create" onSuccess={handlePinCreate} />;
+  }
+
+  if (appState === 'pin-verify') {
+    return (
+      <PinScreen
+        mode="verify"
+        onSuccess={handlePinVerify}
+        biometricEnabled={biometricEnabled}
+        onBiometric={handlePinVerify}
+      />
+    );
+  }
 
   const calculateTotalMonthly = () => {
     return mockSubscriptions.reduce((sum, sub) => {
@@ -244,6 +344,18 @@ const Index = () => {
                             {sub.nextPayment.toLocaleDateString('ru')}
                           </p>
                         </div>
+
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCancelSubscription(sub);
+                          }}
+                          className="ml-2"
+                        >
+                          <Icon name="X" className="h-4 w-4 text-destructive" />
+                        </Button>
                       </div>
                     </Card>
                   );
@@ -283,8 +395,12 @@ const Index = () => {
                             {sub.cost} {sub.currency}/{sub.period === 'month' ? 'мес' : 'год'}
                           </p>
                         </div>
-                        <Button variant="ghost" size="icon">
-                          <Icon name="MoreVertical" className="h-4 w-4" />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleCancelSubscription(sub)}
+                        >
+                          <Icon name="X" className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
                     </Card>
@@ -389,12 +505,67 @@ const Index = () => {
 
           <TabsContent value="settings" className="space-y-4 animate-fade-in">
             <h2 className="text-2xl font-bold">Настройки</h2>
+
+            <Card className="glass-card p-6 space-y-4">
+              <h3 className="font-semibold flex items-center gap-2">
+                <Icon name="Shield" className="h-5 w-5 text-primary" />
+                Безопасность
+              </h3>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <h4 className="font-medium">PIN-код</h4>
+                    <p className="text-sm text-muted-foreground">
+                      {pinEnabled ? 'PIN-код установлен' : 'Защитите приложение PIN-кодом'}
+                    </p>
+                  </div>
+                  {pinEnabled ? (
+                    <Button variant="outline" size="sm" onClick={handleRemovePin}>
+                      Удалить
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" onClick={handleCreatePin}>
+                      Создать
+                    </Button>
+                  )}
+                </div>
+
+                {pinEnabled && (
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <h4 className="font-medium">Биометрия</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Вход по отпечатку пальца или Face ID
+                      </p>
+                    </div>
+                    <Switch
+                      checked={biometricEnabled}
+                      onCheckedChange={handleToggleBiometric}
+                    />
+                  </div>
+                )}
+              </div>
+            </Card>
+            
             <Card className="glass-card p-6 space-y-4">
               <div className="space-y-3">
                 <h3 className="font-semibold">Версия</h3>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Freemium</span>
-                  <Button className="gradient-purple-pink border-0">Upgrade to Pro</Button>
+                  <span className="text-sm text-muted-foreground">
+                    {isPremium ? 'Premium' : 'Freemium'}
+                  </span>
+                  {!isPremium && (
+                    <Button 
+                      className="gradient-purple-pink border-0"
+                      onClick={() => setIsPremium(true)}
+                    >
+                      Upgrade to Pro
+                    </Button>
+                  )}
+                  {isPremium && (
+                    <Badge className="bg-primary">Premium активен</Badge>
+                  )}
                 </div>
               </div>
               <div className="border-t border-border pt-4">
@@ -402,15 +573,15 @@ const Index = () => {
                 <ul className="space-y-2 text-sm text-muted-foreground">
                   <li className="flex items-center gap-2">
                     <Icon name="Check" className="h-4 w-4 text-primary" />
+                    Быстрая отмена подписок
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Icon name="Check" className="h-4 w-4 text-primary" />
                     Неограниченное количество подписок
                   </li>
                   <li className="flex items-center gap-2">
                     <Icon name="Check" className="h-4 w-4 text-primary" />
                     Мультивалютность
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <Icon name="Check" className="h-4 w-4 text-primary" />
-                    Тёмная тема
                   </li>
                   <li className="flex items-center gap-2">
                     <Icon name="Check" className="h-4 w-4 text-primary" />
@@ -426,6 +597,21 @@ const Index = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      {selectedSubscription && (
+        <CancelSubscriptionModal
+          isOpen={cancelModalOpen}
+          onClose={() => {
+            setCancelModalOpen(false);
+            setSelectedSubscription(null);
+          }}
+          subscription={{
+            name: selectedSubscription.name,
+            category: selectedSubscription.category,
+          }}
+          isPremium={isPremium}
+        />
+      )}
     </div>
   );
 };
